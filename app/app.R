@@ -1,9 +1,6 @@
 library(dplyr)
 library(shiny)
-library(jsonlite)
 library(shinydashboard)
-library(readxl)
-library(stringr)
 library(lubridate)
 library(ggplot2)
 library(leaflet)
@@ -49,10 +46,11 @@ server <- function(input, output) {
   })
 
   output$map <- renderLeaflet({
-    pal <- colorQuantile(c("steelblue", "orangered"), domain = c(0, 1))
-    markers <- location_markers()
     frac_exceed <- group_by(ent, SAMPLE_POINT_NAME) %>%
       summarise(FRAC_EXCEED=sum(CONCENTRATION>input$thresh)/n())
+
+    pal <- colorQuantile(c("steelblue", "orangered"), domain = c(0, max(frac_exceed$FRAC_EXCEED)))
+    markers <- location_markers()
 
     markers <- left_join(markers, frac_exceed, by='SAMPLE_POINT_NAME')
     print(summary(markers))
