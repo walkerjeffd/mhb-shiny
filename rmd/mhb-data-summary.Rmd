@@ -1,0 +1,87 @@
+---
+title: "Maine Health Beaches Data Summary"
+author: "Jeffrey D Walker, PhD"
+date: "May 23, 2015"
+output: html_document
+---
+
+```{r}
+library(dplyr)
+library(stringr)
+library(lubridate)
+library(ggplot2)
+library(leaflet)
+
+DATA_DIR <- '~/Dropbox/Work/mhb/data/'
+
+```
+
+```{r load-locations}
+locations <- read.csv(file=file.path(DATA_DIR, 'locations.csv'), stringsAsFactors=FALSE) %>%
+  select(SITE_ID=EGAD.Site.Sequence.., SITE_NAME=CURRENT_SITE_NAME,
+         SAMPLE_POINT_ID=EGAD.Sample.Point.Sequence.., SAMPLE_POINT_NAME=CURRENT_SAMPLE_POINT_NAME,
+         LATITUDE, LONGITUDE)
+glimpse(locations)
+```
+
+```{r}
+df <- readRDS(file=file.path(DATA_DIR, 'data.Rdata')) %>%
+  rename(SITE_ID=SITE_SEQUENCE_NUMBER,
+         SAMPLE_POINT_ID=SAMPLE_SEQUENCE_NUMBER) %>%
+  select(TOWN, SITE_NAME, SAMPLE_POINT_NAME, SAMPLE_DATE, SAMPLE_TYPE,
+         SAMPLE_TYPE_QUALIFIER, COLLECTION_METHOD, PARAMETER_NAME, CONCENTRATION,
+         PARAMETER_UNITS, QUANITATION_LIMIT, METHOD_DETECTION_LIMIT) %>%
+  mutate(SITE_NAME=str_trim(SITE_NAME)) %>%
+  filter(!is.na(CONCENTRATION))
+ent <- filter(df, PARAMETER_NAME=='ENTEROCOCCI', !is.na(CONCENTRATION))
+```
+
+```{r}
+ent_locations <- select(ent, TOWN, SITE_NAME, SAMPLE_POINT_NAME) %>%  
+  unique
+glimpse(ent_locations)
+```
+
+```{r}
+group_by(ent_locations, TOWN, SITE_NAME) %>%
+  tally %>%
+  as.data.frame
+```
+
+Unique locations are defined by `SAMPLE_POINT_NAME`, which are nested within `SITE_NAME` and then `TOWN`.
+
+```{r}
+group_by(ent_locations, TOWN, SITE_NAME, SAMPLE_POINT_NAME) %>%
+  tally %>%
+  as.data.frame
+```
+
+Check that all `SAMPLE_POINT_NAME` in dataset are in location table
+
+```{r}
+stopifnot(length(setdiff(unique(ent$SAMPLE_POINT_NAME), locations$SAMPLE_POINT_NAME))==0)
+```
+
+Add `TOWN` to locations
+
+```{r}
+locations <- left_join(locations, ent_locations, by=c('SITE_NAME', 'SAMPLE_POINT_NAME'))
+```
+
+Keep on `SAMPLE_POINT_NAME` in dataset
+
+```{r}
+df <- select(df, -TOWN, -SITE_NAME) %>%
+  mutate_each(funs(factor), SAMPLE_POINT_NAME, SAMPLE_TYPE, SAMPLE_TYPE_QUALIFIER,
+              COLLECTION_METHOD, PARAMETER_NAME, PARAMETER_UNITS)
+```
+
+```{r}
+locations <- mutate_each(locations, funs(factor), SITE_NAME, SAMPLE_POINT_NAME, TOWN)
+```
+
+```{r}
+save(df, locations, file='../data.Rdata')
+```
+
+

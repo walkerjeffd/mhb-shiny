@@ -8,25 +8,24 @@ library(lubridate)
 library(ggplot2)
 library(leaflet)
 
-DATA_DIR <- '~/Dropbox/Work/mhb/data/'
+theme_set(theme_bw())
 
-df <- readRDS(file=file.path(DATA_DIR, 'data.Rdata'))
-locations <- read.csv(file=file.path(DATA_DIR, 'locations.csv'), stringsAsFactors=FALSE)
-names(locations)[1] <- 'EGAD_SEQ'
-
-df <- filter(df, SITE_SEQUENCE_NUMBER %in% locations$EGAD_SEQ)
-locations <- filter(locations, EGAD_SEQ %in% unique(df$SITE_SEQUENCE_NUMBER))
+load('data.Rdata')
 
 ui <- dashboardPage(
   dashboardHeader(title = "ME Healthy Beaches"),
-  dashboardSidebar(),
+  dashboardSidebar(
+    sliderInput('thresh', label='Enterococcus Standard', min=0, max=200, value=107)
+  ),
   dashboardBody(
     fluidRow(
-      box(leafletOutput('map', height=400)),
-      box(textOutput('text'))
+      column(width = 12,
+        box(leafletOutput('map', height=400), width = '100%')
+      )
     ),
     fluidRow(
-      box(plotOutput('ts', height=400))
+      box(plotOutput('histogram', height=300)),
+      box(plotOutput('ts', height=300))
     )
   )
 )
@@ -34,24 +33,45 @@ ui <- dashboardPage(
 server <- function(input, output) {
   map <- leaflet(locations) %>%
     addTiles() %>%
-    addMarkers(lng=~LONGITUDE, lat=~LATITUDE, popup = ~CURRENT_SITE_NAME, layerId = ~CURRENT_SAMPLE_POINT_NAME)
+    addMarkers(lng=~LONGITUDE, lat=~LATITUDE, popup = ~SAMPLE_POINT_NAME, layerId = ~SAMPLE_POINT_NAME)
 
   output$map <- renderLeaflet(map)
 
   output$text <- renderText({
-#     names(input)
     input$map_marker_click$id
+  })
+
+  output$histogram <- renderPlot({
+    if (is.null(input$map_marker_click) || is.null(input$map_marker_click$id))
+      return(NULL)
+    location_id <- input$map_marker_click$id
+    location <- filter(locations, SAMPLE_POINT_NAME==location_id)
+    threshold <- input$thresh
+
+    data <- filter(df, SAMPLE_POINT_NAME==location_id, PARAMETER_NAME=='ENTEROCOCCI') %>%
+      mutate(EXCEED=CONCENTRATION > threshold)
+
+    p <- ggplot(data, aes(CONCENTRATION, fill=EXCEED)) +
+      geom_histogram() +
+      scale_x_log10() +
+      geom_vline(xint=threshold, linetype=2, color='red') +
+      scale_fill_manual('Exceedence', values=c('TRUE'='orangered', 'FALSE'='steelblue'))
+    print(p)
   })
 
   output$ts <- renderPlot({
     if (is.null(input$map_marker_click) || is.null(input$map_marker_click$id))
       return(NULL)
     location_id <- input$map_marker_click$id
-    location <- filter(locations, CURRENT_SAMPLE_POINT_NAME==location_id)
-    data <- filter(df, SAMPLE_POINT_NAME==location_id, PARAMETER_NAME=='ENTEROCOCCI')
-    p <- ggplot(data, aes(SAMPLE_DATE, CONCENTRATION)) +
+    location <- filter(locations, SAMPLE_POINT_NAME==location_id)
+    threshold <- input$thresh
+    data <- filter(df, SAMPLE_POINT_NAME==location_id, PARAMETER_NAME=='ENTEROCOCCI') %>%
+      mutate(EXCEED=CONCENTRATION > threshold)
+    p <- ggplot(data, aes(SAMPLE_DATE, CONCENTRATION, color=EXCEED)) +
       geom_point() +
-      scale_y_log10()
+      scale_y_log10() +
+      geom_hline(yint=threshold, linetype=2, color='red') +
+      scale_color_manual('Exceedence', values=c('TRUE'='orangered', 'FALSE'='steelblue'))
     print(p)
   })
 }
