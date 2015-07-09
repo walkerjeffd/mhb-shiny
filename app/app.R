@@ -19,29 +19,74 @@ ent_site_tally <- group_by(ent, SAMPLE_POINT_NAME) %>%
             N_YEAR=END_YEAR-START_YEAR+1)
 locations <- left_join(locations, ent_site_tally, by='SAMPLE_POINT_NAME')
 
-ui <- dashboardPage(
-  dashboardHeader(title = "ME Healthy Beaches"),
-  dashboardSidebar(
-    sliderInput('thresh', label='Enterococcus Standard', min=0, max=200, value=107),
-    sliderInput('nyear', label='Min # Years', min=0, max=max(locations$N_YEAR), value=0),
-    sliderInput('nsample', label='Min # Samples', min=0, max=200, value=0)
+locations <- mutate(locations,
+  POPUP=paste0('<table><tbody>',
+               '<tr><td style="text-align:right;padding-right:10px;">SAMPLE_POINT_NAME: </td><td><b>', SAMPLE_POINT_NAME, '</b></td></tr>',
+               '<tr><td style="text-align:right;padding-right:10px;">SITE_NAME: </td><td><b>', SITE_NAME, '</b></td></tr>',
+               '<tr><td style="text-align:right;padding-right:10px;">TOWN: </td><td><b>', ifelse(is.na(TOWN), "Unspecified", as.character(TOWN)), '</b></td></tr>'),
+               '</tbody></table>')
+
+header <- dashboardHeader(
+  title = "Maine Healthy Beaches",
+  titleWidth = '100%'
+)
+
+sidebar <- dashboardSidebar(disable = TRUE)
+
+controls <- column(width = 3,
+  box(width = NULL,
+      h4('Set Standard (#/100mL)'),
+      sliderInput('thresh', label='Enterococcus Standard', min=0, max=200, value=107),
+      h4('Filter Stations'),
+      sliderInput('nyear', label='Minimum # of Years with Data', min=0, max=max(locations$N_YEAR), value=0),
+      sliderInput('nsample', label='Minimum # of Samples', min=0, max=200, value=0)
   ),
-  dashboardBody(
-    fluidRow(
-      column(width = 12,
-        box(leafletOutput('map', height=400), width = '100%')
-      )
-    ),
-    fluidRow(
-      box(plotOutput('histogram', height=300)),
-      box(plotOutput('ts', height=300))
-    )
+  box(width = NULL, title="About",
+      p('This interface was designed to explore how changing the water quality standard',
+        ' for Enterococcus would effect the frequency of beach closures along the Maine coast',
+        ' based on historical sampling data.'),
+      p('Data were provided by ', a(href="http://www.mainehealthybeaches.org/", "Maine Healthy Beaches")),
+      p('This application was built by ',
+        a(href="http://walker-environmental.com", "Jeffrey D Walker, PhD"),
+        ' using the ', a(href="http://shiny.rstudio.com", "Shiny"),
+        ' web framework by ', a(href="http://rstudio.com", 'RStudio'), '.')
   )
+)
+
+content <- column(width = 9,
+  fluidRow(
+    box(
+      width = 6,
+      title="Sampling Locations",
+      leafletOutput('map', height=600),
+      p('Map shows the location of each sampling station. The stations are colored ',
+        'by the fraction of samples above the standard (100%=red, 0%=blue). ',
+        'Click on a station to view sample distributions and timeseries.')
+    ),
+    column(width = 6,
+           tabPanel(
+             box(width=NULL, textOutput('locationInfo')),
+             box(width=NULL, plotOutput('histogram')),
+             box(width=NULL, plotOutput('ts'))
+           ))
+  )
+)
+
+body <- dashboardBody(
+  fluidRow(
+    controls,
+    content
+  )
+)
+
+ui <- dashboardPage(
+  header,
+  sidebar,
+  body
 )
 
 server <- function(input, output) {
   location_markers <- reactive({
-    print(input$nyear)
     filter(locations, N_YEAR>=input$nyear, N_SAMPLE>=input$nsample)
   })
 
@@ -53,17 +98,17 @@ server <- function(input, output) {
     markers <- location_markers()
 
     markers <- left_join(markers, frac_exceed, by='SAMPLE_POINT_NAME')
-    print(summary(markers))
 
     map <- leaflet(markers) %>%
       addTiles() %>%
       addCircleMarkers(lng=~LONGITUDE, lat=~LATITUDE, color=~pal(FRAC_EXCEED),
                        stroke = FALSE, fillOpacity = 0.8, radius = 6,
-                       popup = ~SAMPLE_POINT_NAME, layerId = ~SAMPLE_POINT_NAME)
+                       popup = ~POPUP, layerId = ~SAMPLE_POINT_NAME)
     map
   })
 
-  output$text <- renderText({
+  output$locationInfo <- renderText({
+    print(input$map_marker_click)
     input$map_marker_click$id
   })
 
