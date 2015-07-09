@@ -69,14 +69,16 @@ content <- column(width = 9,
            box(width=NULL,
                tabsetPanel(
                  tabPanel("Overview",
-                          plotOutput('overviewBars', height="400px")),
+                          plotOutput('overviewBars', height="400px")
+                 ),
                  tabPanel("Selected Location",
                           textOutput('locationText'),
                           tableOutput('locationInfo'),
                           plotOutput('locationHistogram', height="200px"),
                           plotOutput('locationTimeseries', height="200px"),
                           plotOutput('locationAnnual', height="200px"),
-                          p('Numbers at base of each bar are # of samples / year'))
+                          textOutput('locationAnnualText')
+                 )
                )
            )
     )
@@ -220,6 +222,12 @@ server <- function(input, output) {
                           limits=c(0, NA), guide=FALSE) +
       labs(y="% Samples Exceeding Standard", x='')
     print(p)
+  })
+
+  output$locationAnnualText <- renderText({
+    if (is.null(input$map_marker_click) || is.null(input$map_marker_click$id))
+      return(NULL)
+    'Numbers at base of each bar are # of samples / year'
   })
 }
 
