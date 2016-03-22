@@ -30,7 +30,7 @@ log_labels <- function(x, y) {
 # -------------------------------------
 # SET UP DATASETS
 # -------------------------------------
-wq <- readRDS('../data-wq.Rdata') %>%
+wq <- readRDS('data-wq.Rdata') %>%
   mutate(YEAR=year(SAMPLE_DATE),
          WEEK=calweek(SAMPLE_DATE),
          WEEKDAY=wday(SAMPLE_DATE),
@@ -48,7 +48,7 @@ wq <- readRDS('../data-wq.Rdata') %>%
          PAST_WEATHER = ordered(PAST_WEATHER, levels=c("NO RAIN", "LIGHT RAIN", "MEDIUM RAIN", "HIGH RAIN")),
          CURRENT = ordered(CURRENT, levels=c("SLOW CURRENT", "MEDIUM CURRENT", "RAPID CURRENT")))
 
-stn <- readRDS('../data-stn.Rdata')
+stn <- readRDS('data-stn.Rdata')
 stat_by_site <- filter(wq, !is.na(ENTEROCOCCI)) %>%
   group_by(SAMPLE_POINT_NAME) %>%
   summarise(COUNT       = n(),
