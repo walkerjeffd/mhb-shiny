@@ -1,18 +1,17 @@
-library(readxl)
-library(dplyr)
-library(tidyr)
-library(lubridate)
-library(stringr)
-library(ggplot2)
-theme_set(theme_bw())
+source("init.R")
 
-path <- '~/Dropbox/Work/mhb/data/20160129/MHB data 2006-2015.xlsx'
-# excel_sheets(path)
 
-df <- read_excel(path, sheet="Monitoring Data",
+# load data ---------------------------------------------------------------
+
+df <- read_excel(config$dataset,
+                 sheet="Monitoring Data",
                  col_types=c(rep("text", 5),
                              "date",
                              rep("text", 25)))
+
+
+# clean data --------------------------------------------------------------
+
 df <- df[, -31]
 
 names(df) <- str_replace_all(names(df), ' ', '_')
@@ -30,11 +29,11 @@ df <- mutate(df,
 
 df <- unique(df)
 
-loc <- select(df, SITE_SEQUENCE_NUMBER, TOWN, SITE_NAME, SAMPLE_POINT_NAME, SITE_LATITUDE_UTM, SITE_LONGITUDE_UTM) %>%
+stn <- select(df, SITE_SEQUENCE_NUMBER, TOWN, SITE_NAME, SAMPLE_POINT_NAME, SITE_LATITUDE_UTM, SITE_LONGITUDE_UTM) %>%
   unique
 
 # duplicates, different lat/lon
-group_by(loc, SAMPLE_POINT_NAME) %>%
+group_by(stn, SAMPLE_POINT_NAME) %>%
   mutate(n=n()) %>%
   select(SITE_NAME, SAMPLE_POINT_NAME, SITE_LATITUDE_UTM, SITE_LONGITUDE_UTM, n) %>%
   arrange(SITE_NAME, SAMPLE_POINT_NAME) %>%
@@ -42,7 +41,17 @@ group_by(loc, SAMPLE_POINT_NAME) %>%
 
 sort(unique(df$PARAMETER_NAME))
 
-# extract categorical variables
+
+# stations ----------------------------------------------------------------
+
+latlon <- list(stn$SITE_LONGITUDE_UTM, stn$SITE_LATITUDE_UTM)
+latlon_wgs <- project(latlon, proj="+proj=utm +zone=19 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs", inverse = TRUE)
+stn$LATITUDE <- latlon_wgs$y
+stn$LONGITUDE <- latlon_wgs$x
+stn <- select(stn, SITE_SEQUENCE_NUMBER, TOWN, SITE_NAME, SAMPLE_POINT_NAME, LATITUDE, LONGITUDE)
+
+
+# categorical variables ---------------------------------------------------
 
 df_current_weather <- filter(df, grepl("CURRENT WEATHER", PARAMETER_NAME)) %>%
   mutate(VALUE = gsub("CURRENT WEATHER ", "", PARAMETER_NAME),
@@ -83,6 +92,8 @@ df_categorical <- rbind(df_current_weather, df_past_weather_24, df_past_weather_
   spread(PARAMETER_NAME, VALUE)
 
 
+# numeric variables -------------------------------------------------------
+
 df_accumulation <- filter(df, grepl("ACCUMULATION", PARAMETER_NAME)) %>%
   mutate(PARAMETER_NAME = plyr::revalue(PARAMETER_NAME, c("ACCUMULATION LAST 48 HOURS"="ACCUMULATION_48HR",
                                                           "ACCUMULATION LAST 24 HOURS"="ACCUMULATION_24HR")),
@@ -113,27 +124,14 @@ df_numeric <- rbind(df_accumulation, df_air, df_water, df_ent) %>%
   arrange(SAMPLE_POINT_NAME, SAMPLE_DATE)
 
 
-# wide dataset
-wq <- full_join(df_categorical,
-                df_numeric,
-                by=c("SAMPLE_POINT_NAME", "DEP_SAMPLE_ID", "SAMPLE_DATE"))
-
-saveRDS(wq, file="data-wq.Rdata")
-saveRDS(stn, file="data-stn.Rdata")
+# check datasets ----------------------------------------------------------
 
 # which categorical rows are missing from numeric
 anti_join(df_categorical,
           df_numeric,
           by=c("SAMPLE_POINT_NAME", "DEP_SAMPLE_ID", "SAMPLE_DATE"))
 
-
-library(proj4)
-latlon <- list(loc$SITE_LONGITUDE_UTM, loc$SITE_LATITUDE_UTM)
-latlon_wgs <- project(latlon, proj="+proj=utm +zone=19 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs", inverse = TRUE)
-loc$LATITUDE <- latlon_wgs$y
-loc$LONGITUDE <- latlon_wgs$x
-stn <- select(loc, SITE_SEQUENCE_NUMBER, TOWN, SITE_NAME, SAMPLE_POINT_NAME, LATITUDE, LONGITUDE)
-
+# number of samples by year and categorical variable
 gather(df_categorical, PARAMETER_NAME, VALUE, -SAMPLE_POINT_NAME, -DEP_SAMPLE_ID, -SAMPLE_DATE, na.rm=TRUE) %>%
   mutate(YEAR=year(SAMPLE_DATE)) %>%
   group_by(PARAMETER_NAME, YEAR) %>%
@@ -142,6 +140,7 @@ gather(df_categorical, PARAMETER_NAME, VALUE, -SAMPLE_POINT_NAME, -DEP_SAMPLE_ID
   ggplot(aes(as.factor(YEAR), PARAMETER_NAME, fill=n)) +
   geom_tile()
 
+# number of samples by year and numeric variable
 gather(df_numeric, PARAMETER_NAME, VALUE, -SAMPLE_POINT_NAME, -DEP_SAMPLE_ID, -SAMPLE_DATE, na.rm=TRUE) %>%
   mutate(YEAR=year(SAMPLE_DATE)) %>%
   group_by(PARAMETER_NAME, YEAR) %>%
@@ -149,3 +148,26 @@ gather(df_numeric, PARAMETER_NAME, VALUE, -SAMPLE_POINT_NAME, -DEP_SAMPLE_ID, -S
   ungroup %>%
   ggplot(aes(as.factor(YEAR), PARAMETER_NAME, fill=n)) +
   geom_tile()
+
+
+# merge variables ---------------------------------------------------------
+
+wq <- full_join(df_categorical,
+                df_numeric,
+                by=c("SAMPLE_POINT_NAME", "DEP_SAMPLE_ID", "SAMPLE_DATE")) %>%
+  mutate(id = row_number()) %>%
+  mutate(YEAR=year(SAMPLE_DATE),
+         WEEK=as.character(calweek(SAMPLE_DATE)),
+         WEEKDAY=as.character(wday(SAMPLE_DATE))) %>%
+  mutate(WEEK=ordered(WEEK, levels=as.character(seq(20, 46))),
+         WEEKDAY=plyr::revalue(WEEKDAY, replace = c("1"="Sun", "2"="Mon", "3"="Tue", "4"="Wed", "5"="Thu", "6"="Fri", "7"="Sat"), warn_missing = FALSE),
+         WEEKDAY=factor(WEEKDAY, levels=c("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"))) %>%
+  filter(!is.na(ENTEROCOCCI))
+
+# export ------------------------------------------------------------------
+
+saveRDS(wq, file="data/rdata/wq-raw.rda")
+saveRDS(stn, file="data/rdata/stn.rda")
+
+write.csv(wq, file="data/csv/wq-raw.csv", row.names = FALSE)
+write.csv(stn, file="data/csv/stn.csv", row.names = FALSE)

@@ -18,125 +18,31 @@ library(ggplot2)
 theme_set(theme_bw())
 library(gridExtra)
 library(knitr)
-library(readxl)
-
-DATA_DIR <- '~/Dropbox/Work/mhb/data/'
 
 opts_chunk$set(echo=FALSE, message=FALSE)
 ```
 
 ```{r load-data, cache=TRUE, results='hide'}
-sites <- read.csv(file=file.path(DATA_DIR, 'locations.csv'), stringsAsFactors=FALSE) %>%
-  select(BEACH_ID=EGAD.Site.Sequence.., BEACH_NAME=CURRENT_SITE_NAME,
-         SITE_ID=EGAD.Sample.Point.Sequence.., SITE_NAME=CURRENT_SAMPLE_POINT_NAME,
-         LATITUDE, LONGITUDE, UTM_X=UTM.X, UTM_Y=UTM.Y)
-glimpse(sites)
-
-beaches <- read.csv(file=file.path(DATA_DIR, 'beaches.csv'), stringsAsFactors=FALSE) %>%
-  select(BEACH_ID=EGAD_SEQ, BEACH_NAME=CURRENT_SITE_NAME,
-         LATITUDE, LONGITUDE, UTM_X, UTM_Y)
-glimpse(beaches)
-
-data1 <- read_excel(file.path(DATA_DIR, "../MHB Data Extract/MHB data extract.xlsx"),
-                    col_types=c("numeric", "text", "text", "text", "text", "date",
-                                "text", "text", "text", "text", "text", "numeric",
-                                "text", "text", "numeric", "numeric", "text", "numeric",
-                                "text", "text", "text", "text", "text", "text",
-                                "numeric", "text", "text", "text", "text"))
-names(data1) <- str_replace_all(names(data1), '[ ]', '_')
-data1 <- rename(data1, SITE_LATITUDE_UTM=`SITE_LATITUDE_(UTM)`, SITE_LONGITUDE_UTM=`SITE_LONGITUDE_(UTM)`)
-data1 <- mutate_each(data1, funs(as.numeric), SITE_LATITUDE_UTM, SITE_LONGITUDE_UTM)
-
-data2 <- read_excel(file.path(DATA_DIR, "../MHB Data Extract/MHB_2014.xlsx"),
-                    col_types=c("numeric", "text", "text", "text", "text", "date",
-                                "text", "text", "text", "text", "text", "numeric",
-                                "text", "text", "numeric", "numeric", "text", "numeric",
-                                "text", "text", "text", "text", "text", "text",
-                                "numeric", "text", "text", "text", "text"))
-names(data2) <- str_replace_all(names(data2), '[ ]', '_')
-data2 <- rename(data2,
-                SITE_SEQUENCE_NUMBER=SITE_NUMBER,
-                SAMPLE_SEQUENCE_NUMBER=SAMPLE_NUMBER,
-                SITE_LATITUDE_UTM=`SITE_LATITUDE_(UTM)`, SITE_LONGITUDE_UTM=`SITE_LONGITUDE_(UTM)`)
-data2 <- mutate_each(data2, funs(as.numeric), SITE_LATITUDE_UTM, SITE_LONGITUDE_UTM)
-
-df <- rbind(data1, data2)
-
-df <- rename(df,
-             BEACH_ID=SITE_SEQUENCE_NUMBER,
-             BEACH_NAME=SITE_NAME,
-             SITE_NAME=SAMPLE_POINT_NAME,
-             SAMPLE_DATETIME=SAMPLE_DATE)
-
-df <- mutate_each(df, funs(factor),
-                  SAMPLE_TYPE, SAMPLE_TYPE_QUALIFIER, COLLECTION_METHOD,
-                  PARAMETER_NAME, PARAMETER_UNITS, TEST_METHOD, TEST_METHOD_DESCRIPTION,
-                  RESULT_TYPE, ANALYSIS_LAB)
-
-df <- mutate(df, 
-             BEACH_NAME=str_trim(BEACH_NAME),
-             SITE_NAME=str_trim(SITE_NAME),
-             SAMPLE_DATE=floor_date(SAMPLE_DATETIME, unit="day"),
-             YEAR=year(SAMPLE_DATE),
-             MONTH=month(SAMPLE_DATE))
-
-df <- filter(df, !is.na(CONCENTRATION))
-
-ent <- filter(df, PARAMETER_NAME=='ENTEROCOCCI') %>%
-  select(TOWN, BEACH_ID, BEACH_NAME, SITE_NAME, SAMPLE_DATETIME, SAMPLE_DATE, YEAR, MONTH,
-         CONCENTRATION, CONCENTRATION_QUALIFIER, PARAMETER_UNITS, QUANITATION_LIMIT, 
-         METHOD_DETECTION_LIMIT, DILUTION_FACTOR, TEST_METHOD, SAMPLE_COMMENTS, ANALYSIS_LAB)
-```
-
-```{r check-sites, results='hide'}
-ent_sites <- select(ent, TOWN, BEACH_ID, BEACH_NAME, SITE_NAME) %>%  
-  unique
-glimpse(ent_sites)
-
-stopifnot(all(ent_sites$SITE_NAME %in% sites$SITE_NAME))
-
-# list of duplicate SITE_NAMEs
-# some have new beaches, which are similar to the primary beach in the sites table
-group_by(ent_sites, TOWN, SITE_NAME) %>%
-  mutate(N=n()) %>%
-  ungroup %>%
-  filter(N>1) %>%
-  arrange(SITE_NAME) %>%
-  left_join(select(sites, SITE_NAME, BEACH_ID, BEACH_NAME), by="SITE_NAME")
-
-# replace BEACH_ID and BEACH_NAME in ent with those in sites
-ent <- select(ent, -BEACH_ID, -BEACH_NAME) %>%
-  left_join(select(sites, SITE_NAME, BEACH_ID, BEACH_NAME))
-ent_sites <- select(ent, TOWN, BEACH_ID, BEACH_NAME, SITE_NAME) %>%  
-  unique
-stopifnot(sum(duplicated(ent_sites$SITE_NAME)) == 0)
-
-# check missing values by column
-sapply(ent, function (x) { sum(is.na(x)) })
-```
-
-```{r define-limits, results='hide'}
+stn <- readRDS("../data/rdata/stn.rda")
+ent <- readRDS("../data/rdata/wq-resamples.rda")
 ent <- mutate(ent,
-              GT_70=CONCENTRATION > 70,
-              GT_104=CONCENTRATION > 104,
-              CLASS=ordered(GT_70+GT_104, levels=c(0, 1, 2), labels=c('<=70', '70-104', '>104')))
-glimpse(ent)
+              MONTH=month(SAMPLE_DATE),
+              GT_70=ENTEROCOCCI > 70,
+              GT_104=ENTEROCOCCI > 104,
+              CLASS=ordered(GT_70+GT_104, levels=c(0, 1, 2),
+                            labels=c('<=70', '70-104', '>104')),
+              SAMPLE_TYPE=ifelse(RESAMPLE, "Resample",
+                                 ifelse(OTHER, "Irregular", "Routine")),
+              SAMPLE_TYPE=ordered(SAMPLE_TYPE, levels=c("Routine", "Resample", "Irregular")))
+ent <- left_join(ent,
+                 select(stn, TOWN, BEACH_NAME=SITE_NAME, SAMPLE_POINT_NAME),
+                 by="SAMPLE_POINT_NAME")
 
 scale_class_fill <- scale_fill_manual('', values=c('<=70'='grey50', '70-104'='deepskyblue', '>104'='orangered'))
 scale_class_color <- scale_color_manual('', values=c('<=70'='grey50', '70-104'='deepskyblue', '>104'='orangered'))
 
-ent_limits <- data.frame(CONCENTRATION=c(70, 104), LABEL=ordered(c('70', '104')))
+ent_limits <- data.frame(ENTEROCOCCI=c(70, 104), LABEL=ordered(c('70', '104')))
 scale_limits_color <- scale_color_manual('', values=c('70'='deepskyblue', '104'='orangered'))
-```
-
-```{r ent-counts}
-ent <- group_by(ent, TOWN, BEACH_NAME, SITE_NAME) %>%
-  mutate(N_SITE=n()) %>%
-  group_by(TOWN, BEACH_NAME) %>%
-  mutate(N_BEACH=n()) %>%
-  group_by(TOWN) %>%
-  mutate(N_TOWN=n()) %>%
-  ungroup
 ```
 
 
@@ -165,17 +71,17 @@ log_y <- scale_y_log10(breaks=log_breaks(seq(1, 9), 10^seq(-3, 5)),
 
 ## All Samples
 
-This section summarizes the entire population of all enterococcus samples.
+This section summarizes the distribution of all enterococcus samples. It only includes routine samples and thus excludes all resamples.
 
-This figure shows the histogram of all samples on a log-scale. The vertical lines show the 70 and 104 limits.
-
-The distribution is uni-modal, the large change at 10 MPN/100mL is due to the detection limits.
+This figure shows the histogram of all routine samples on a log-scale. The vertical lines show the 70 and 104 limits. The distribution is uni-modal, the large change at 10 MPN/100mL is due to the detection limits.
 
 ```{r plot-histogram}
 ent %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
   ggplot() +
-  geom_histogram(aes(CONCENTRATION), binwidth=0.3) +
-  geom_vline(aes(xintercept=CONCENTRATION, color=LABEL), data=ent_limits, show_guide=TRUE) +
+  geom_histogram(aes(ENTEROCOCCI), binwidth=0.3) +
+  geom_vline(aes(xintercept=ENTEROCOCCI, color=LABEL),
+             data=ent_limits) +
   scale_limits_color +
   scale_y_continuous(labels=scales::comma) +
   log_x +
@@ -183,76 +89,70 @@ ent %>%
        title="Distribution of All Samples")
 ```
 
-This figure shows the same data, but on a linear scale and only including samples with ENT < 200 to focus on the lower range.
+This figure shows the same data, but on a linear scale and only including samples with ENT < 200 to focus on the lower range. Again, the majority of routine samples are at or below the detection limit of 10 MPN/100mL.
 
 ```{r plot-histogram-200}
 ent %>%
-  filter(CONCENTRATION < 200) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
+  filter(ENTEROCOCCI < 200) %>%
   ggplot() +
-  geom_histogram(aes(CONCENTRATION), binwidth=10) +
-  geom_vline(aes(xintercept=CONCENTRATION, color=LABEL), data=ent_limits, show_guide=TRUE) +
+  geom_histogram(aes(ENTEROCOCCI), binwidth=10) +
+  geom_vline(aes(xintercept=ENTEROCOCCI, color=LABEL), data=ent_limits) +
   scale_limits_color +
   scale_y_continuous(labels=scales::comma) +
   labs(x="ENT (MPN/100mL)", y="# Samples",
        title="Distribution of All Samples with ENT < 200")
 ```
 
-**Question**: What fraction of all samples are between 70 and 104?
+**Question**: What fraction of all routine samples are between 70 and 104?
 
-**Answer**: `r scales::percent(prop.table(table(ent$CLASS))['70-104'])`
+**Answer**: `r scales::percent(prop.table(table(filter(ent, SAMPLE_TYPE == "Routine")$CLASS))['70-104'])`
 
-This table shows the fraction of samples <70, between 70-104, and >104.
+This table shows the fraction of routine samples <70, between 70-104, and >104.
 
 ```{r prop-class}
 ent %>% 
+  filter(SAMPLE_TYPE == "Routine") %>%
   select(CLASS) %>% 
   table() %>%
   prop.table() %>%
   as.data.frame %>%
-  kable(col.names=c('Range', 'Fraction'), digits=3)
+  mutate(Freq=scales::percent(Freq)) %>%
+  kable(col.names=c('Range', 'Percent'), digits=3)
 ```
 
 
-**Question**: If a sample is greater than 70 MPN/100mL, what is the probability it is also > 104?
+**Question**: If a routine sample is greater than 70 MPN/100mL, what is the probability it is also > 104?
 
-**Answer**: `r scales::percent(prop.table(table(filter(ent, GT_70)$CLASS))['>104'])`
+**Answer**: `r scales::percent(prop.table(table(filter(ent, GT_70, SAMPLE_TYPE == "Routine")$CLASS))['>104'])`
 
-This table shows the fraction of samples between 70-104 and >104 based only on samples with concentrations <70.
+This table shows the fraction of samples between 70-104 and >104 based only on samples with concentrations <70. This shows that out of all samples greater than 70 MPN/100mL, about 70% are also above 104, and 30% are between 70 and 104.
 
 ```{r prop-class-gt70}
 ent %>% 
+  filter(SAMPLE_TYPE == "Routine") %>%
   filter(GT_70) %>%
   droplevels %>% 
   select(CLASS) %>% 
   table() %>%
   prop.table() %>%
   as.data.frame %>%
-  kable(col.names=c('Range', 'Fraction'), digits=3)
+  mutate(Freq=scales::percent(Freq)) %>%
+  kable(col.names=c('Range', 'Percent'), digits=3)
 ```
-
-**Question**: If the threshold were lowered from 104 to 70, how many more days would be exceedences?
-
-**Answer**: There were `r nrow(filter(ent, GT_104))` days exceeding 104, and `r (nrow(filter(ent, GT_70))-nrow(filter(ent, GT_104)))` days between 70 and 104. So there would be `r scales::percent((nrow(filter(ent, GT_70))-nrow(filter(ent, GT_104)))/nrow(filter(ent, GT_104)))` more exceedence days.
 
 ## By Beach
 
-In this section, the data are grouped by beach and thus may include more than one sampling site. Beaches with fewer than 20 samples in total are excluded, which include:
+In this section, the data are grouped by beach and thus may include more than one sampling site.
 
-```{r tbl-beaches-excluded}
-group_by(ent, TOWN, BEACH_NAME) %>% 
-  summarise(N_SAMPLE=n()) %>% 
-  ungroup %>% 
-  arrange(N_SAMPLE) %>%
-  filter(N_SAMPLE<20) %>%
-  kable
-```
-
-
-This figure shows the total number of samples in each category (<70, 70-104, >104), ordered by the total number of samples.
+This figure shows the total number of routine samples in each category (<70, 70-104, >104).
 
 ```{r plot-count-beach, fig.width=10, fig.height=10}
 ent %>%
-  filter(N_BEACH >= 20) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
+  group_by(BEACH_NAME) %>%
+  mutate(N_BEACH = n()) %>%
+  ungroup %>%
   arrange(N_BEACH) %>%
   mutate(BEACH_NAME=ordered(BEACH_NAME, levels=unique(BEACH_NAME))) %>%
   group_by(BEACH_NAME, CLASS) %>%
@@ -273,11 +173,11 @@ ent %>%
   theme(axis.text.y=element_text(size=6))
 ```
 
-This figure shows the same data, but instead of the number of samples, it shows the fraction of samples in each category by beach ordered by the fraction >104 (dirtiest beaches at the top, cleanest at the bottom). 
+This figure shows the same data, but instead of the number of routine samples, it shows the fraction of routine samples in each category by beach ordered by the fraction >104 (dirtiest beaches at the top, cleanest at the bottom). 
 
 ```{r plot-count-beach-pct, fig.width=10, fig.height=10}
 ent %>%
-  filter(N_BEACH >= 20) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
   group_by(BEACH_NAME, CLASS) %>%
   summarise(N=n()) %>%
   mutate(FRAC=N/sum(N)) %>%
@@ -299,11 +199,11 @@ ent %>%
   theme(axis.text.y=element_text(size=6))
 ```
 
-This figure shows only the fraction of total samples between 70-104 (the blue bars of the previous figure) and ordered from highest to lowest. 
+This figure shows only the fraction of routine samples between 70-104 (the blue bars of the previous figure) and ordered from highest to lowest. 
 
 ```{r plot-beach-count-pct-70-104, fig.width=10, fig.height=10}
 ent %>%
-  filter(N_BEACH >= 20) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
   group_by(BEACH_NAME, CLASS) %>%
   summarise(N=n()) %>%
   mutate(FRAC=N/sum(N)) %>%
@@ -321,16 +221,16 @@ ent %>%
   scale_class_fill +
   scale_y_continuous(labels=scales::percent, breaks=seq(0, 1, by=0.01)) +
   labs(y="% of Samples", x="Beach",
-       title="Fraction of Samples between 70-104 by Beach and Category") +
+       title="Fraction of Samples between 70-104 by Beach") +
   coord_flip() +
   theme(axis.text.y=element_text(size=6))
 ```
 
-This figure shows the cumulative distribution of % samples for each category across beaches. It shows, for example, that 50% of the beaches have 80.7% or less of samples <70 (dotted gray line), and that 90% of beaches have 9.4% or less of samples between 70-104 (dotted blue line).
+This figure shows the cumulative distribution of % routine samples for each category across beaches. It shows, for example, that 50% of the beaches have 90% or less of samples <70 (dotted gray line), and that 90% of beaches have 7% or less of samples between 70-104 (dotted blue line).
 
 ```{r plot-beaches-cdf, fig.width=8, fig.height=6}
 ent %>%
-  filter(N_BEACH >= 20) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
   group_by(BEACH_NAME, CLASS) %>%
   summarise(N=n()) %>%
   mutate(FRAC=N/sum(N)) %>%
@@ -341,10 +241,10 @@ ent %>%
   ggplot(aes(INDEX, FRAC, color=CLASS)) +
   geom_point() +
   geom_line() +
-  geom_segment(x=0, xend=0.5, y=0.8068, yend=0.8068, color='grey50', linetype='dotted') +
-  geom_segment(x=0.5, xend=0.5, y=0, yend=0.8068, color='grey50', linetype='dotted') +
-  geom_segment(x=0, xend=0.9, y=0.09375, yend=0.09375, color='deepskyblue', linetype='dotted') +
-  geom_segment(x=0.9, xend=0.9, y=0, yend=0.09375, color='deepskyblue', linetype='dotted') +
+  geom_segment(x=0, xend=0.5, y=0.8965, yend=0.8965, color='grey50', linetype='dotted') +
+  geom_segment(x=0.5, xend=0.5, y=0, yend=0.8965, color='grey50', linetype='dotted') +
+  geom_segment(x=0, xend=0.9, y=0.068085106, yend=0.068085106, color='deepskyblue', linetype='dotted') +
+  geom_segment(x=0.9, xend=0.9, y=0, yend=0.068085106, color='deepskyblue', linetype='dotted') +
   scale_class_color +
   scale_x_continuous(labels=scales::percent, breaks=seq(0, 1, 0.1)) +
   scale_y_continuous(labels=scales::percent, breaks=seq(0, 1, 0.1)) +
@@ -356,7 +256,7 @@ This figure shows the same data, but separates each category into separate panel
 
 ```{r plot-beaches-cdf-facet, fig.width=10, fig.height=4}
 ent %>%
-  filter(N_BEACH >= 20) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
   group_by(BEACH_NAME, CLASS) %>%
   summarise(N=n()) %>%
   mutate(FRAC=N/sum(N)) %>%
@@ -380,38 +280,27 @@ ent %>%
 
 ## By Site
 
-In this section, the data are grouped by site instead of beach. Sites with fewer than 10 samples in total are excluded, which include:
-
-```{r tbl-sites-excluded}
-group_by(ent, TOWN, BEACH_NAME, SITE_NAME) %>% 
-  summarise(N_SAMPLE=n()) %>% 
-  ungroup %>% 
-  arrange(N_SAMPLE) %>%
-  filter(N_SAMPLE<10) %>%
-  kable
-```
-
+In this section, the data are grouped by site instead of beach.
 
 This figure shows the total number of samples in each category (<70, 70-104, >104), ordered by the total number of samples.
 
 ```{r plot-count-site, fig.width=10, fig.height=12}
 ent %>%
-  filter(N_SITE >= 10) %>%
-  group_by(SITE_NAME, CLASS) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
+  group_by(SAMPLE_POINT_NAME, CLASS) %>%
   summarise(N=n()) %>%
   ungroup %>%
   spread(CLASS, N, fill=0) %>%
-  gather(CLASS, N, -SITE_NAME) %>%
+  gather(CLASS, N, -SAMPLE_POINT_NAME) %>%
   mutate(CLASS=ordered(CLASS, levels=rev(levels(ent$CLASS)))) %>%
   mutate(FRAC=N/sum(N)) %>%
-  group_by(SITE_NAME) %>%
+  group_by(SAMPLE_POINT_NAME) %>%
   mutate(N_SITE=sum(N)) %>%
   ungroup %>%
-  filter(N_SITE >= 10) %>%
   arrange(N_SITE) %>%
-  mutate(SITE_NAME=ordered(SITE_NAME, levels=unique(SITE_NAME))) %>%
+  mutate(SAMPLE_POINT_NAME=ordered(SAMPLE_POINT_NAME, levels=unique(SAMPLE_POINT_NAME))) %>%
   arrange(desc(CLASS)) %>%
-  ggplot(aes(SITE_NAME, N, fill=CLASS)) +
+  ggplot(aes(SAMPLE_POINT_NAME, N, fill=CLASS)) +
   geom_bar(stat='identity', position='stack') +
   scale_class_fill +
   labs(y="Number of Samples", x="Beach",
@@ -424,22 +313,22 @@ This figure shows the same data, but instead of the number of samples, it shows 
 
 ```{r plot-count-site-pct, fig.width=10, fig.height=10}
 ent %>%
-  filter(N_SITE >= 10) %>%
-  group_by(SITE_NAME, CLASS) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
+  group_by(SAMPLE_POINT_NAME, CLASS) %>%
   summarise(N=n()) %>%
   mutate(FRAC=N/sum(N)) %>%
   ungroup %>%
-  group_by(SITE_NAME) %>%
+  group_by(SAMPLE_POINT_NAME) %>%
   mutate(N_SITE=sum(N)) %>%
-  filter(N_SITE > 10) %>%
+  ungroup %>%
   select(-N, -N_SITE) %>%
   spread(CLASS, FRAC, fill=0) %>%
   arrange(`>104`) %>%
-  mutate(SITE_NAME=ordered(SITE_NAME, levels=unique(SITE_NAME))) %>%
-  gather(CLASS, FRAC, -SITE_NAME) %>%
+  mutate(SAMPLE_POINT_NAME=ordered(SAMPLE_POINT_NAME, levels=unique(SAMPLE_POINT_NAME))) %>%
+  gather(CLASS, FRAC, -SAMPLE_POINT_NAME) %>%
   mutate(CLASS=ordered(CLASS, levels=rev(levels(ent$CLASS)))) %>%
   arrange(desc(CLASS)) %>%
-  ggplot(aes(SITE_NAME, FRAC, fill=CLASS)) +
+  ggplot(aes(SAMPLE_POINT_NAME, FRAC, fill=CLASS)) +
   geom_bar(stat='identity', position='stack') +
   scale_class_fill +
   scale_y_continuous(labels=scales::percent) +
@@ -453,20 +342,20 @@ This figure shows only the fraction of total samples between 70-104 (the blue ba
 
 ```{r plot-site-count-pct-70-104, fig.width=10, fig.height=10}
 ent %>%
-  filter(N_SITE >= 10) %>%
-  group_by(SITE_NAME, CLASS) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
+  group_by(SAMPLE_POINT_NAME, CLASS) %>%
   summarise(N=n()) %>%
   mutate(FRAC=N/sum(N)) %>%
   ungroup %>%
   select(-N) %>%
   spread(CLASS, FRAC, fill=0) %>%
   arrange(`70-104`) %>%
-  mutate(SITE_NAME=ordered(SITE_NAME, levels=unique(SITE_NAME))) %>%
-  gather(CLASS, FRAC, -SITE_NAME) %>%
+  mutate(SAMPLE_POINT_NAME=ordered(SAMPLE_POINT_NAME, levels=unique(SAMPLE_POINT_NAME))) %>%
+  gather(CLASS, FRAC, -SAMPLE_POINT_NAME) %>%
   mutate(CLASS=ordered(CLASS, levels=rev(levels(ent$CLASS)))) %>%
   arrange(desc(CLASS)) %>%
   filter(CLASS=="70-104") %>%
-  ggplot(aes(SITE_NAME, FRAC, fill=CLASS)) +
+  ggplot(aes(SAMPLE_POINT_NAME, FRAC, fill=CLASS)) +
   geom_bar(stat='identity', position='stack') +
   scale_class_fill +
   scale_y_continuous(labels=scales::percent, breaks=seq(0, 1, by=0.01)) +
@@ -476,26 +365,25 @@ ent %>%
   theme(axis.text.y=element_text(size=6))
 ```
 
-This figure shows the cumulative distribution of % samples for each category across beaches. It shows, for example, that 50% of the beaches have 81.2% or less of samples <70 (dotted gray line), and that 90% of beaches have 9.7% or less of samples between 70-104 (dotted blue line).
+This figure shows the cumulative distribution of % samples for each category across beaches. It shows, for example, that 50% of the beaches have 90% or less of samples <70 (dotted gray line), and that 90% of beaches have 7% or less of samples between 70-104 (dotted blue line).
 
 ```{r plot-sites-cdf, fig.width=8, fig.height=6}
 ent %>%
-  filter(N_SITE >= 10) %>%
-  group_by(SITE_NAME, CLASS) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
+  group_by(SAMPLE_POINT_NAME, CLASS) %>%
   summarise(N=n()) %>%
   mutate(FRAC=N/sum(N)) %>%
   ungroup %>%
-  # filter(CLASS=='70-104') %>%
   arrange(CLASS, FRAC) %>%
   group_by(CLASS) %>%
   mutate(INDEX=row_number()/n()) %>%
   ggplot(aes(INDEX, FRAC, color=CLASS)) +
   geom_point() +
   geom_line() +
-  geom_segment(x=0, xend=0.5, y=0.8132, yend=0.8132, color='grey50', linetype='dotted') +
-  geom_segment(x=0.5, xend=0.5, y=0, yend=0.8132, color='grey50', linetype='dotted') +
-  geom_segment(x=0, xend=0.9, y=0.09709, yend=0.09709, color='deepskyblue', linetype='dotted') +
-  geom_segment(x=0.9, xend=0.9, y=0, yend=0.09709, color='deepskyblue', linetype='dotted') +
+  geom_segment(x=0, xend=0.5, y=0.9014, yend=0.9014, color='grey50', linetype='dotted') +
+  geom_segment(x=0.5, xend=0.5, y=0, yend=0.9014, color='grey50', linetype='dotted') +
+  geom_segment(x=0, xend=0.9, y=0.0714, yend=0.0714, color='deepskyblue', linetype='dotted') +
+  geom_segment(x=0.9, xend=0.9, y=0, yend=0.0714, color='deepskyblue', linetype='dotted') +
   scale_class_color +
   scale_x_continuous(labels=scales::percent, breaks=seq(0, 1, 0.1)) +
   scale_y_continuous(labels=scales::percent, breaks=seq(0, 1, 0.1)) +
@@ -507,7 +395,8 @@ This figure shows the same data, but separates each category into separate panel
 
 ```{r plot-sites-cdf-facet, fig.width=10, fig.height=4}
 ent %>%
-  group_by(SITE_NAME, CLASS) %>%
+  filter(SAMPLE_TYPE == "Routine") %>%
+  group_by(SAMPLE_POINT_NAME, CLASS) %>%
   summarise(N=n()) %>%
   mutate(FRAC=N/sum(N)) %>%
   ungroup %>%
@@ -529,479 +418,81 @@ ent %>%
 
 # Sampling Frequency and Resampling
 
-This section looks at the frequency of sampling. Are most sites weekly? How often are resamples collected?
+This section looks at how often resamples come back above or below the current limit of 104. This figure plots the each resample concentration against the concentration of the previous (routine) sample.
 
-```{r ent-dt}
-ent <- arrange(ent, SITE_NAME, SAMPLE_DATE) %>%
-  group_by(SITE_NAME) %>%
-  mutate(DT=as.numeric(difftime(SAMPLE_DATETIME, lag(SAMPLE_DATETIME), units="days")))
-```
-
-This figure shows a histogram of the number of days between samples based on the entire dataset and excluding samples taken more than 35 days from the previous sample. There are obvious peaks at 7, 14, 21, and 28 days corresponding to weekly, biweekly, triweekly, and quatro(?)weekly sampling schedules. There are also a fair number of samples collected 1 day or less from the previous sample.
-
-```{r plot-dt-histogram}
+```{r}
 ent %>%
-  filter(DT<35) %>%
-  ggplot(aes(DT)) +
-  geom_histogram(binwidth=1, fill='grey50', color='white') +
-  scale_x_continuous(breaks=seq(0, 50, 7)) +
-  labs(x="Days between Samples", y="# of Samples",
-       title="Histogram of # Days between Samples")
-```
-
-## Samples Collected within 1.5 Days of Previous Sample
-
-This section focuses on samples collected within 1.5 days of the previous sample.
-
-This figure shows the distribution of time between samples and distinguishing between samples concentrations <70, 70-104, and >104. The majority of these daily consecutive samples were below both the 70 and 104 thresholds.
-
-```{r plot-dt-hist-1-day}
-ent %>%
-  filter(DT<1.5) %>%
-  ggplot(aes(DT, fill=CLASS)) +
-  geom_histogram(binwidth=1/24, color='white') +
-  scale_class_fill +
-  labs(x="Days between Samples", y="# of Samples",
-       title="Histogram of # Days between Samples")
-```
-
-Among these samples, `r scales::percent(prop.table(table(filter(ent, DT<1.5)$CLASS))[['>104']])` were above the 104 threshold and `r scales::percent(1-prop.table(table(filter(ent, DT<1.5)$CLASS))[['<=70']])` were above the 70 threshold.
-
-This table lists the fraction of samples collected within 1.5 days of previous sample by category.
-
-```{r tbl-dt-1-day}
-ent %>%
-  filter(DT<1.5) %>%
-  .$CLASS %>%
-  table %>%
-  prop.table %>%
-  as.data.frame %>%
-  kable(col.names=c('Range', 'Fraction'), digits=3)
-```
-
-But when did these daily consecutive samples occur? This figure shows the number of daily consecutive samples by month and year. There is an obvious outlier in August of 2005 with over 80 samples collected within 1.5 days of the previous sample.
-
-```{r plot-dt-1-day-tile}
-ent %>%
-  filter(DT<1.5) %>%
-  group_by(MONTH, YEAR) %>%
-  summarise(N=n()) %>%
-  ggplot(aes(factor(YEAR), factor(MONTH), fill=N)) + 
-  geom_tile() +
-  scale_fill_gradientn('# Samples', colours=rev(scales::brewer_pal(type = "seq", palette = 'Spectral')(9))) +
-  labs(x="Year", y="Month",
-       title="Number of Consecutive Daily Samples by Month and Year")
-```
-
-In summer of 2005, five stations at Goose Rocks were apparently sampled daily during weekdays, perhaps as part of a special intensive sampling program.
-
-```{r plot-dt-goose-rocks, fig.width=10}
-ent %>%
-  filter((DT<1.5 | lead(DT)<1.5), YEAR==2005, MONTH %in% c(7, 8, 9),
-         SITE_NAME %in% c("GR-1", "GR-2", "GR-3", "GR-4", "GR-5")) %>%
-  ggplot(aes(SAMPLE_DATETIME, CONCENTRATION)) +
+  arrange(SAMPLE_POINT_NAME, SAMPLE_DATE) %>%
+  group_by(SAMPLE_POINT_NAME, YEAR) %>%
+  mutate(PREV_ENTEROCOCCI=lag(ENTEROCOCCI),
+         PREV_CLASS=lag(CLASS),
+         DT=as.numeric(difftime(floor_date(SAMPLE_DATE, "day"),
+                                lag(floor_date(SAMPLE_DATE, "day")),
+                                units="days"))) %>%
+  # select(SAMPLE_POINT_NAME, SAMPLE_DATE, ENTEROCOCCI, PREV_ENTEROCOCCI,
+  #        CLASS, PREV_CLASS, DT) %>%
+  filter(RESAMPLE, PREV_ENTEROCOCCI>104, DT<=3) %>%
+  ggplot(aes(PREV_ENTEROCOCCI, ENTEROCOCCI, color=CLASS)) +
   geom_point() +
-  facet_wrap(~SITE_NAME) +
-  labs(x="Sample Date", y="ENT (MPN/100mL)", title="Daily Sampling at Goose Rocks in July-September 2005")
-```
-
-Using these daily samples, we can also look at the transition probabilities between 'clean' and 'dirty' days. For example, if a given sample is below the threshold (Clean), what is the chance that a sample collected on the following day is above the threshold (Dirty)?
-
-```{r ent-day}
-ent.day <- ent %>%
-  group_by(SITE_NAME) %>%
-  mutate(NEXT_DT=lead(DT),
-         NEXT_CONCENTRATION=lead(CONCENTRATION),
-         NEXT_GT_70=lead(GT_70),
-         NEXT_GT_104=lead(GT_104),
-         STATUS=ifelse(GT_104, 'D', 'C'),
-         NEXT_STATUS=lead(STATUS),
-         COMBINED_STATUS=paste0(STATUS, NEXT_STATUS)) %>%
-  filter(NEXT_DT<1.5)
-```
-
-This figure shows the relationship between concentrations measured on consecutive days. The x-value is the concentration on the first day, the y-value is the concentration on the following day. The black line is a linear regression, which shows no strong relationship between concentrations on consecutive days. Note this includes all sites.
-
-```{r plot-dt-1-day-scatter}
-ent.day %>%
-  ggplot(aes(CONCENTRATION, NEXT_CONCENTRATION)) +
-  geom_point(aes(color=COMBINED_STATUS)) +
-  geom_smooth(method='lm', se=FALSE, color='black') +
-  log_x +
-  log_y +
-  # geom_hline(aes(yintercept=70, color=LABEL), color='deepskyblue', linetype='dashed') +
-  geom_hline(aes(yintercept=104, color=LABEL), color='orangered', linetype='dashed') +
-  # geom_vline(aes(xintercept=70, color=LABEL), color='deepskyblue', linetype='dashed') +
-  geom_vline(aes(xintercept=104, color=LABEL), color='orangered', linetype='dashed') +
-  scale_color_manual('',
-                     values=c('CC'='grey50', 'CD'='deepskyblue', 'DC'='chartreuse3', 'DD'='orangered'),
-                     labels=c('CC'='Clean -> Clean', 'CD'='Clean -> Dirty',
-                              'DC'='Dirty -> Clean', 'DD'='Dirty -> Dirty')) +
-  labs(x="ENT (MPN/100mL) on First Day", y="ENT (MPN/100mL) on Following Day",
-       title="Relationship between Concentrations on Consecutive Days") +
-  theme(panel.grid.minor=element_blank())
-```
-
-```{r ent-day-tbl}
-ent.day.tbl <-
-  table(plyr::revalue(ent.day$STATUS, c(C='Clean', D='Dirty')),
-        plyr::revalue(ent.day$NEXT_STATUS, c(C='Clean', D='Dirty'))) %>%
-  prop.table(margin=1)
-```
-
-This table lists the transition probabilities between Clean and Dirty over two consecutive days using the 104 threshold. The rows indicate the condition on the first day, the columns indicate the condition on the second day. The values are the probabilities of going from the row condition to the column condition (thus the sum of each row is 1). For example, if the first day was Dirty, then there is a `r scales::percent(ent.day.tbl['Dirty', 'Clean'])` chance of the next day being Clean and a `r scales::percent(ent.day.tbl['Dirty', 'Dirty'])` chance of the next day being Dirty.
-
-```{r tbl-day-trans-prob}
-ent.day.tbl %>%
-  kable(digits=3)
-```
-
-
-
-
-
-
-
-```{r, eval=FALSE}
-filter(ent, SITE_NAME %in% c("WIL-02", "EEB-01")) %>%
-  group_by(SITE_NAME) %>%
-  mutate(NEXT_DT=lead(DT)) %>%
-  ggplot(aes(factor(YEAR), NEXT_DT)) +
-  geom_boxplot() +
-  ylim(0, 7) +
-  facet_grid(SITE_NAME~GT_104)
-```
-
-```{r, eval=FALSE}
-ent %>%
-  filter(!(SITE_NAME %in% c("WIL-02", "EEB-01"))) %>%
-  group_by(SITE_NAME) %>%
-  mutate(NEXT_DT=lead(DT)) %>%
-  ggplot(aes(factor(YEAR), NEXT_DT)) +
-  geom_boxplot() +
-  ylim(0, 6)
-```
-
-```{r, eval=FALSE}
-ent %>%
-  # filter(!(SITE_NAME %in% c("WIL-02", "EEB-01"))) %>%
-  group_by(SITE_NAME) %>%
-  mutate(NEXT_DT=round(lead(DT))) %>%
-  filter(NEXT_DT < 7) %>%
-  group_by(YEAR, NEXT_DT) %>%
-  summarise(N=n()) %>%
-  ggplot(aes(factor(YEAR), N, fill=factor(NEXT_DT))) +
-  geom_bar(stat='identity', position='stack')
-
-```
-
-## Potential Resamples
-
-When a sample exceeds the current 104 threshold, then a resample is supposed to be taken shortly after to determine when it is safe to open the beach. 
-
-This section excludes `EEB-01` and `WIL-02` which Meagan identified as having routine sampling at 2 or 3 times per week.
-
-This figure shows the number of samples per year that were collected within 6.5 days of the previous sample (and at the same site). The bars are split by the range of concentrations on the previous day.
-
-```{r}
-ent %>%
-  filter(!(SITE_NAME %in% c("WIL-02", "EEB-01"))) %>%
-  group_by(SITE_NAME) %>%
-  mutate(PREV_CONCENTRATION=lag(CONCENTRATION),
-         PREV_CLASS=lag(CLASS)) %>%
-  filter(DT <= 6.5) %>%
-  group_by(YEAR, PREV_CLASS) %>%
-  summarise(N=n()) %>%
-  ungroup %>%
-  mutate(PREV_CLASS=ordered(PREV_CLASS, levels=rev(levels(PREV_CLASS)))) %>%
-  ggplot(aes(factor(YEAR), N, fill=PREV_CLASS)) +
-  geom_bar(stat='identity') +
-  scale_class_fill +
-  labs(x="Year", y="# of Samples")
-```
-
-This figure shows the fraction of samples collected in each year that were in each concentration range. 
-
-Interestingly, the fraction of samples less than 104 decreased over time. In 2013 and 2014, about 25% of the samples that had another sample collected within 6.5 days despite being less than 104 MPN/100mL (and thus would not have triggered a resample). This suggests there other reasons why samples might be collected more than weekly.
-
-```{r}
-ent %>%
-  filter(!(SITE_NAME %in% c("WIL-02", "EEB-01"))) %>%
-  group_by(SITE_NAME) %>%
-  mutate(PREV_CONCENTRATION=lag(CONCENTRATION),
-         PREV_CLASS=lag(CLASS)) %>%
-  filter(DT <= 6.5) %>%
-  group_by(YEAR, PREV_CLASS) %>%
-  summarise(N=n()) %>%
-  ungroup %>%
-  mutate(PREV_CLASS=ordered(PREV_CLASS, levels=rev(levels(PREV_CLASS)))) %>%
-  ggplot(aes(factor(YEAR), N, fill=PREV_CLASS)) +
-  geom_bar(stat='identity', position='fill') +
-  scale_class_fill +
-  scale_y_continuous(labels=scales::percent) +
-  labs(x="Year", y="% of Samples",
-       title="% of Samples by Concentration Range and Year\nOnly Including Samples where Next Sample is within 6.5 Days")
-
-```
-
-This is the same figure but using only samples where another sample was collected within 3.5 days. In 2013 and 2014, a relatively small fraction (<5%) were below the 104 threshold, which suggests that these were primarily re-samples. However, in 2003-2005, more than 50% of the samples were less than 104.
-
-```{r}
-ent %>%
-  filter(!(SITE_NAME %in% c("WIL-02", "EEB-01"))) %>%
-  group_by(SITE_NAME) %>%
-  mutate(PREV_CONCENTRATION=lag(CONCENTRATION),
-         PREV_CLASS=lag(CLASS)) %>%
-  filter(DT <= 3.5) %>%
-  group_by(YEAR, PREV_CLASS) %>%
-  summarise(N=n()) %>%
-  ungroup %>%
-  mutate(PREV_CLASS=ordered(PREV_CLASS, levels=rev(levels(PREV_CLASS)))) %>%
-  ggplot(aes(factor(YEAR), N, fill=PREV_CLASS)) +
-  geom_bar(stat='identity', position='fill') +
-  scale_class_fill +
-  scale_y_continuous(labels=scales::percent) +
-  labs(x="Year", y="% of Samples",
-       title="% of Samples by Concentration Range and Year\nOnly Including Samples where Next Sample is within 3.5 Days")
-
-```
-
-This figure shows how the distribution of samples in each category changes depending on the number of days until the next sample. There is a large shift from primarily samples exceeding 104 to primarily samples <= 70 between 4.5-7.5 days. This suggests that resamples are primarily collected within 4.5 days.
-
-```{r}
-compute <- function(n) {
-  ent %>%
-    filter(!(SITE_NAME %in% c("WIL-02", "EEB-01")), YEAR!=2005) %>%
-    group_by(SITE_NAME) %>%
-    mutate(PREV_CONCENTRATION=lag(CONCENTRATION),
-           PREV_CLASS=lag(CLASS)) %>%
-    filter(DT <= n) %>%
-    group_by(PREV_CLASS) %>%
-    summarise(N=n()) %>%
-    ungroup %>%
-    mutate(N_DT=n)
-}
-lapply(seq(1.5, 13, 0.5), compute) %>%
-  rbind_all %>%
-  group_by(N_DT) %>%
-  mutate(N_TOTAL=sum(N)) %>%
-  ungroup %>%
-  mutate(VALUE=N/N_TOTAL) %>%
-  ggplot(aes(N_DT, VALUE, color=PREV_CLASS)) +
-  geom_point() +
-  geom_line() +
+  geom_hline(aes(yintercept=ENTEROCOCCI),
+             data=ent_limits, linetype=2) +
   scale_class_color +
-  scale_x_continuous(breaks=seq(0, 20, 1), limits=c(0, NA)) +
-  scale_y_continuous(labels=scales::percent, limits=c(0, 1)) +
-  labs(x="Days until Next Sample", y="Mean % of Samples")
+  log_x + 
+  log_y +
+  labs(x="Previous Routine Enterococci (MPN/100mL)",
+       y="Resample Enterococci (MPN/100mL)",
+       title="Comparison of Resample Concentration to Previous Sample")
 ```
 
-```{r, eval=FALSE}
-ent %>%
-  filter(!(SITE_NAME %in% c("WIL-02", "EEB-01"))) %>%
-  group_by(SITE_NAME) %>%
-  mutate(PREV_CONCENTRATION=lag(CONCENTRATION),
-         PREV_CLASS=lag(CLASS)) %>%
-  filter(DT <= 6.5, PREV_CLASS %in% c("<=70", "70-104")) %>%
-  select(TOWN, BEACH_NAME, SITE_NAME) %>%
-  unique
-```
-
-
-```{r, eval=FALSE}
-ent %>%
-  filter(!(SITE_NAME %in% c("WIL-02", "EEB-01"))) %>%
-  group_by(SITE_NAME) %>%
-  mutate(PREV_CONCENTRATION=lag(CONCENTRATION),
-         PREV_CLASS=lag(CLASS)) %>%
-  filter(DT <= 6.5) %>%
-  ggplot(aes(PREV_CONCENTRATION, CONCENTRATION)) +
-  geom_point() +
-  log_y + 
-  log_x
-```
-
+**Question**: What percent of all resamples have concentrations exceeding 104?
 
 ```{r}
-opts_chunk$set(eval=FALSE)
-```
-
-```{r}
-group_by(ent, SAMPLE_POINT_NAME) %>%
-  summarise(N=n(),
-            MIN=min(DT, na.rm=TRUE),
-            MED=median(DT, na.rm=TRUE),
-            MAX=max(DT, na.rm=TRUE)) %>%
-  arrange(MED) %>%
-  as.data.frame
-```
-
-```{r}
-filter(ent, SAMPLE_POINT_NAME=="MDI-03") %>%
-  filter(DT<50) %>%
-  ggplot(aes(yday(SAMPLE_DATE), DT, color=GT_104)) +
-  geom_point() +
-  ylim(0, NA) +
-  scale_color_manual('> 104', values=c("TRUE"='red', 'FALSE'='grey50')) +
-  facet_wrap(~YEAR, scales='free_x')
-```
-
-
-```{r}
-ent %>%
-  # filter(SAMPLE_POINT_NAME=="BID-01") %>%
-  mutate(WEEK=week(SAMPLE_DATE)) %>%
-  group_by(YEAR, WEEK) %>%
-  summarise(N=n(),
-            N_SITE=length(unique(SAMPLE_POINT_NAME)),
-            FRAC=N/N_SITE) %>%
-  ungroup %>%
-  ggplot(aes(factor(YEAR), factor(WEEK), fill=FRAC)) +
-  geom_tile() +
-  labs(x='Year', y='Week of Year') +
-  scale_fill_gradientn('# Sample\nper Site', colours=rev(scales::brewer_pal(type = "seq", palette = 'Spectral')(9)))
-```
-
-```{r}
-ent %>%
-  group_by(YEAR, MONTH) %>%
-  summarise(N=n(),
-            N_SITE=length(unique(SAMPLE_POINT_NAME)),
-            FRAC=N/N_SITE) %>%
-  ungroup %>%
-  ggplot(aes(factor(YEAR), factor(MONTH), fill=FRAC)) +
-  geom_tile() +
-  labs(x='Year', y='Month of Year') +
-  scale_fill_gradientn('# Sample\nper Site', colours=rev(scales::brewer_pal(type = "seq", palette = 'Spectral')(9)))
-```
-
-
-
-```{r}
-ent %>%
-  group_by(YEAR) %>%
-  summarise(N=n(),
-            N_SITE=length(unique(SAMPLE_POINT_NAME)),
-            FRAC=N/N_SITE) %>%
-  ungroup %>%
-  ggplot(aes(factor(YEAR), N_SITE, fill=FRAC)) +
-  geom_bar(stat='identity') +
-  labs(x='Year', y='# Sites') +
-  scale_fill_gradientn('# Sample\nper Site', colours=rev(scales::brewer_pal(type = "seq", palette = 'Spectral')(9)))
-```
-
-
-```{r}
-ent %>%
-  mutate(WEEK=week(SAMPLE_DATE)) %>%
-  group_by(SAMPLE_POINT_NAME, YEAR, WEEK) %>%
-  summarise(N=n()) %>%
-  ungroup %>%
+ent_resample <- ent %>%
+  arrange(SAMPLE_POINT_NAME, SAMPLE_DATE) %>%
+  group_by(SAMPLE_POINT_NAME, YEAR) %>%
+  mutate(PREV_ENTEROCOCCI=lag(ENTEROCOCCI),
+         PREV_CLASS=lag(CLASS),
+         DT=as.numeric(difftime(floor_date(SAMPLE_DATE, "day"),
+                                lag(floor_date(SAMPLE_DATE, "day")),
+                                units="days"))) %>%
+  filter(RESAMPLE, !(lag(RESAMPLE)), PREV_ENTEROCOCCI>104, DT<=3) %>%
   group_by(SAMPLE_POINT_NAME) %>%
-  summarise(MIN=min(N),
-            MAX=max(N),
-            MEAN=mean(N),
-            MEDIAN=median(N),
-            STDEV=sd(N),
-            N=sum(N)) %>%
-  arrange(desc(MEDIAN)) %>%
-  as.data.frame
+  summarise(N_TOTAL=n(),
+            N_EXCEED=sum(ENTEROCOCCI > 104)) %>%
+  summarise(N_TOTAL=sum(N_TOTAL),
+            N_EXCEED=sum(N_EXCEED))
 ```
+
+**Answer**: There were `r ent_resample$N_EXCEED` resamples that exceed 104 MPN/100mL out of `r ent_resample$N_TOTAL` total resamples, and thus `r scales::percent(ent_resample$N_EXCEED/ent_resample$N_TOTAL)` of all resamples continue to exceed 104 MPN/100mL.
+
+This figure shows the percent of all resamples that come back above the current limit of 104 by site. This only includes initial resamples (i.e. resamples that follow a routine sample, but not resamples that are the second or third resample in a row). This also only includes sites that have at least 10 resamples total over the entire period (to exclude sites with only a couple resamples). This shows that at LIN-3, more than 40% of the resamples following a routine sample continued to exceed the 104 MPN/100mL.
 
 ```{r}
 ent %>%
-  mutate(WEEK=week(SAMPLE_DATE)) %>%
-  group_by(SAMPLE_POINT_NAME, YEAR, MONTH) %>%
-  summarise(N=n()) %>%
-  ungroup %>%
+  arrange(SAMPLE_POINT_NAME, SAMPLE_DATE) %>%
+  group_by(SAMPLE_POINT_NAME, YEAR) %>%
+  mutate(PREV_ENTEROCOCCI=lag(ENTEROCOCCI),
+         PREV_CLASS=lag(CLASS),
+         DT=as.numeric(difftime(floor_date(SAMPLE_DATE, "day"),
+                                lag(floor_date(SAMPLE_DATE, "day")),
+                                units="days"))) %>%
+  # select(SAMPLE_POINT_NAME, SAMPLE_DATE, ENTEROCOCCI, PREV_ENTEROCOCCI,
+  #        CLASS, PREV_CLASS, DT) %>%
+  filter(RESAMPLE, !(lag(RESAMPLE)), PREV_ENTEROCOCCI>104, DT<=3) %>%
   group_by(SAMPLE_POINT_NAME) %>%
-  summarise(MIN=min(N),
-            MAX=max(N),
-            MEAN=mean(N),
-            MEDIAN=median(N),
-            STDEV=sd(N),
-            N=sum(N)) %>%
-  arrange(desc(MAX)) %>%
-  as.data.frame
-```
-
-
-
-```{r, eval=FALSE}
-# What fraction of samples that are within 5 days of a previous exceedence also exceed 104
-ent <- group_by(ent, SAMPLE_POINT_NAME) %>%
-  mutate(PREV_CLASS = ifelse(lag(GT_104), 'D', 'C'),
-         CURR_CLASS = ifelse(GT_104, 'D', 'C'),
-         CLASS = ifelse(is.na(PREV_CLASS), NA, paste0(PREV_CLASS, CURR_CLASS))) %>%
-  mutate(CLASS=ordered(CLASS, levels=c('CC', 'CD', 'DC', 'DD')))
-
-ent %>%
-  filter(!is.na(CLASS)) %>%
-  filter(DT < 5) %>%
-  group_by(CLASS) %>%
-  summarise(N=n())
-
-
-
-ent %>%
-  filter(!is.na(CLASS)) %>%
-  filter(DT < 7) %>%
-  group_by(SAMPLE_POINT_NAME, CLASS) %>%
-  summarise(N=n()) %>%
-  mutate(N_SITE=sum(N)) %>%
-  ungroup %>%
-  filter(N_SITE > 10) %>%
-  spread(CLASS, N, fill=0) %>%
-  arrange(desc(DD/N_SITE)) %>%
-  mutate(SAMPLE_POINT_NAME=ordered(SAMPLE_POINT_NAME, levels=SAMPLE_POINT_NAME)) %>%
-  gather(CLASS, N, -SAMPLE_POINT_NAME, -N_SITE) %>%
-  ggplot(aes(SAMPLE_POINT_NAME, N, fill=CLASS)) +
-  geom_bar(stat='identity', position='fill') +
-  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
-
-
-  filter(CLASS %in% c('DC', 'DD')) %>%
-  group_by(SAMPLE_POINT_NAME, CLASS) %>%
-  summarise(N=n()) %>%
-  mutate(N_SITE=sum(N),
-         FRAC=N/N_SITE) %>%
-  select(-N) %>%
-  ungroup %>%
-  spread(CLASS, FRAC, fill=0) %>%
-  arrange(desc(DD)) %>%
-  mutate(SAMPLE_POINT_NAME=ordered(SAMPLE_POINT_NAME, levels=SAMPLE_POINT_NAME)) %>%
-  gather(CLASS, FRAC, -SAMPLE_POINT_NAME, -N_SITE) %>%
-  filter(N_SITE > 4) %>%
-  ggplot(aes(SAMPLE_POINT_NAME, FRAC, fill=CLASS)) +
-  geom_bar(stat='identity', position='stack') +
-  theme(axis.text.x=element_text(angle=90, hjust=1, vjust=0.5))
-```
-
-
-
-```{r}
-# overall distribution
-ggplot(ent, aes(log10(CONCENTRATION))) + geom_histogram(binwidth=0.2) + geom_vline(xint=log10(70)) + geom_vline(xint=log10(104))
-```
-
-
-```{r}
-# what is fraction of samples between 70 and 104? 6%
-ungroup(ent) %>%
-  mutate(CLASS=CONCENTRATION >= 70 & CONCENTRATION <= 104) %>%
-  group_by(CLASS) %>%
-  tally
-```
-
-
-
-
-```{r}
-# if sample > 70, what is prob its also > 104?  ~60%
-ungroup(ent) %>%
-  filter(CONCENTRATION >= 70) %>%
-  mutate(GT_104 = (CONCENTRATION > 104)) %>%
-  group_by(GT_104) %>%
-  tally
+  summarise(N_TOTAL=n(),
+            N_EXCEED=sum(ENTEROCOCCI > 104)) %>%
+  mutate(FRAC=N_EXCEED/N_TOTAL) %>%
+  filter(N_TOTAL > 10) %>%
+  arrange(desc(FRAC)) %>%
+  mutate(SAMPLE_POINT_NAME=ordered(SAMPLE_POINT_NAME, levels=rev(SAMPLE_POINT_NAME))) %>%
+  ggplot(aes(SAMPLE_POINT_NAME, FRAC)) +
+  geom_bar(aes(fill=">104"), stat="identity") +
+  scale_y_continuous(labels=scales::percent, breaks=seq(0, 1, by=0.1)) +
+  scale_fill_manual("", values="orangered") +
+  labs(y="% of Resamples Exceeding 104", x="Site",
+       title="Fraction of Resamples Exceeding 104 by Site") +
+  coord_flip() +
+  theme(axis.text.y=element_text(size=6))
 ```
 

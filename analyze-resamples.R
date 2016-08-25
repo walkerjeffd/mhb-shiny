@@ -11,7 +11,7 @@ calweek <- function (x) {
   y
 }
 
-wq <- readRDS('data-wq-resamples.Rdata') %>%
+wq <- readRDS('data/rdata/wq-resamples.rda') %>%
   arrange(SAMPLE_POINT_NAME, SAMPLE_DATE) %>%
   mutate(GT_104 = ENTEROCOCCI > 104,
          GT_70 = ENTEROCOCCI > 70,
@@ -23,7 +23,11 @@ wq %>%
   mutate(PREV_GT_104=lag(GT_104)) %>%
   filter(RESAMPLE, !PREV_GT_104) %>%
   select(SAMPLE_POINT_NAME, id, SAMPLE_DATE, WEEK) %>%
-  nrow # should be 0
+  nrow %>%
+  (function (x) {
+    cat("nrow =", x, "\n")
+    stopifnot(x == 0)
+  })
 
 # compute fraction of routine samples between 70-104 by site and year
 bav_site_year <- filter(wq, !RESAMPLE, !OTHER) %>%

@@ -19,6 +19,7 @@ log_breaks <- function(x, y) {
   # log breaks
   as.vector(outer(x, y, '*'))
 }
+
 log_labels <- function(x, y) {
   # labels for log scales with gaps
   x_na <- seq(1, 9)
@@ -32,8 +33,8 @@ log_labels <- function(x, y) {
 # -------------------------------------
 # SET UP DATASETS
 # -------------------------------------
-stn <- readRDS('data-stn.Rdata')
-wq <- readRDS('data-wq-resamples.Rdata')
+stn <- readRDS("stn.rda")
+wq <- readRDS("wq-resamples.rda")
 
 wq <- wq %>%
   mutate(SAMPLE_TYPE = ifelse(RESAMPLE, "Resample",

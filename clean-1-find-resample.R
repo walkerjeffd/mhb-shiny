@@ -1,16 +1,24 @@
-library(shiny)
-library(miniUI)
-library(ggplot2)
-library(dplyr)
-library(lubridate)
+stop("THE SCRIPT flag-resamples.R SHOULD ONLY BE RUN INTERACTIVELY AND NOT WITH source()")
 
-# This script was created to manually flag any samples considered a "resample" or "other"
+source("init.R")
+library(miniUI)
+
+# This script creates a shiny gadget for manually flaging any samples considered
+# a "resample" or "other"
+
 # Resamples are defined as a sample collected within a couple days of a previous exceedence
 #   note that sometimes resamples are collected in the following week (e.g. if the sample
 #   on friday was an exceedence, they might not resample until monday)
-# "Other" samples are those that are not resamples and do not appear to be "routine"
+
+# Other samples are those that are not resamples and do not appear to be "routine"
 #   there are some years and sites where samples were collected irregularly
 #   other samples were flagged to leave only the regular samples for analysis
+
+# After using the shiny gadget to assign resample/other samples, the results
+# will be saved to the resamples and others data frames
+
+
+# load data ---------------------------------------------------------------
 
 calweek <- function (x) {
   y <- week(x + days(wday(as.Date(paste(year(x), "01", "01", sep="-")))-1))
@@ -18,8 +26,7 @@ calweek <- function (x) {
   y
 }
 
-wq <- readRDS('data-wq.Rdata') %>%
-  mutate(id = row_number()) %>%
+wq <- readRDS("data/rdata/wq-raw.rda") %>%
   mutate(YEAR=year(SAMPLE_DATE),
          WEEK=as.character(calweek(SAMPLE_DATE)),
          WEEKDAY=as.character(wday(SAMPLE_DATE))) %>%
@@ -31,11 +38,13 @@ wq <- readRDS('data-wq.Rdata') %>%
 stations <- sort(unique(wq$SAMPLE_POINT_NAME))
 
 
-# Shiny Gadget
-#   data: data frame containing all samples for a single station (stn)
-#   click: when a sample is clicked, the id is printed to the console and the
-#          id and stn are appended to the `results` data frame (which is a global)
+# shiny gadget ------------------------------------------------------------
+
 ggbrush <- function(data, stn) {
+  # data: data frame containing all samples for a single station (stn)
+  # click: when a sample is clicked, the id is printed to the console and the
+  #        id and stn are appended to the `results` data frame (which is a global)
+
   ui <- miniPage(
     gadgetTitleBar("Click to select a sample point"),
     miniContentPanel(
@@ -104,6 +113,7 @@ for (stn in stations) {
   }
 }
 
+# IMPORTANT!!!
 # the following variables are iterative changes to the resamples array
 # note that these are NOT reproducible and only worked when I first did
 # this because the results data frame will be different
@@ -135,16 +145,7 @@ others_8 <- rbind(others_7, filter(results, id == 4771))
 others <- others_8
 resamples <- resamples_12
 
-# save flagged ids
-write.csv(resamples, file="resamples.csv", row.names=FALSE)
-write.csv(others, file="others.csv", row.names=FALSE)
+# export ------------------------------------------------------------------
 
-# apply resample and others to wq data frame
-wq <- mutate(wq,
-             RESAMPLE = id %in% resamples$id,
-             OTHER = id %in% others$id)
-
-# save updated wq data frame
-write.csv(wq, file="wq-with-resamples.csv", row.names=FALSE)
-saveRDS(wq, file="data-wq-resamples.Rdata")
-
+write.csv(resamples, file="data/csv/samples-resample.csv", row.names=FALSE)
+write.csv(others, file="data/csv/samples-other.csv", row.names=FALSE)

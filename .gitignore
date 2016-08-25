@@ -2,6 +2,11 @@
 .Rhistory
 .RData
 *.Rdata
+*.rda
 *.html
 *.pdf
 *.csv
+!data/csv/samples-other.csv
+!data/csv/samples-resample.csv
+rmd/*summary_cache/
+rmd/*summary_files/
