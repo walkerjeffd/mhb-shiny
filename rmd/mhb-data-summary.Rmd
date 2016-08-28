@@ -1,5 +1,5 @@
 ---
-title: "Maine Healthy Beaches: Data Exploration to Support Threshold Justification"
+title: "Maine Healthy Beaches: Data Exploration"
 author: "Jeffrey D Walker, PhD"
 date: "`r format(Sys.Date(), '%B %d, %Y')`"
 output: 
@@ -35,7 +35,7 @@ ent <- mutate(ent,
                                  ifelse(OTHER, "Irregular", "Routine")),
               SAMPLE_TYPE=ordered(SAMPLE_TYPE, levels=c("Routine", "Resample", "Irregular")))
 ent <- left_join(ent,
-                 select(stn, TOWN, BEACH_NAME=SITE_NAME, SAMPLE_POINT_NAME),
+                 select(stn, TOWN, BEACH_NAME=SITE_NAME, SAMPLE_POINT_NAME) %>% distinct,
                  by="SAMPLE_POINT_NAME")
 
 scale_class_fill <- scale_fill_manual('', values=c('<=70'='grey50', '70-104'='deepskyblue', '>104'='orangered'))
